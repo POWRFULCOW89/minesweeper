@@ -1,17 +1,26 @@
 package me.diegomelo.minesweeper
 
+import android.content.Context
+import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
+import android.os.Vibrator
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,12 +73,48 @@ class MainActivity : ComponentActivity() {
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
     private var shakeListener: ShakeListener? = null
-
+    private var columns by mutableStateOf(10)
+    private var mineCount by mutableStateOf(10)
+    private var rows by mutableStateOf(10)
+    private lateinit var configActivityLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        configActivityLauncher =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                run {
+                    Log.d("MainActivity", "onActivityResult: result=$result")
+
+                    if (result.resultCode == RESULT_OK) {
+                        result.data?.let {
+                            val newRows = it.getIntExtra("rows", 10)
+                            val newColumns = it.getIntExtra("columns", 10)
+                            val newMineCount = it.getIntExtra("mineCount", 10)
+
+                            // Save the new parameters to SharedPreferences
+//                        preferencesManager.saveGameParameters(rows, columns, mineCount)
+
+                            rows = newRows
+                            columns = newColumns
+                            mineCount = newMineCount
+
+
+                            restartGame()
+                        }
+                        // Restart the game with new parameters
+                    }
+                }
+            }
+
         setContent {
-            MinesweeperApp(onRestartGame = { restartGame() })
+            MinesweeperApp(
+                rows = rows,
+                columns = columns,
+                mineCount = mineCount,
+                onConfigClick = { openConfigActivity() },
+                onRestartGame = { restartGame() }
+            )
         }
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
@@ -77,6 +122,25 @@ class MainActivity : ComponentActivity() {
 
         shakeListener = ShakeListener {
             restartGame()
+            Toast.makeText(this, "Game reset!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun restartGame() {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        vibrator.vibrate(100)
+
+
+
+        setContent {
+            MinesweeperApp(
+                rows = rows,
+                columns = columns,
+                mineCount = mineCount,
+                onConfigClick = { openConfigActivity() },
+                onRestartGame = { restartGame() }
+            )
+            // Restart by resetting the MinesweeperApp content
         }
     }
 
@@ -92,51 +156,118 @@ class MainActivity : ComponentActivity() {
         sensorManager.unregisterListener(shakeListener)
     }
 
-    // Method to restart the game
-    private fun restartGame() {
-        setContent {
-            MinesweeperApp(onRestartGame = { restartGame() })
-        }
+    // Function to open ConfigActivity for configuring the game
+    private fun openConfigActivity() {
+        val intent = Intent(this, ConfigActivity::class.java)
+
+        configActivityLauncher.launch(intent)
+//        startActivity(intent)
     }
-}
 
-@Composable
-fun MinesweeperApp(onRestartGame: () -> Unit) {
-    val rows = 20
-    val columns = 10
-    val mineCount = 10
-    var game = remember { MinesweeperGame(rows, columns, mineCount) }
 
-    Box(modifier = Modifier.background(Color.Gray)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (game.isGameOver) {
-                Text("Game Over", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Red)
-            } else if (game.isGameWon) {
-                Text(
-                    "You Win!",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Green
-                )
-            } else {
-                MinesweeperGrid(game = game, onRestartGame = {
-                    game =
-                        MinesweeperGame(rows, columns, mineCount) // Reiniciar el estado del juego
-                })
+    // Handling result from ConfigActivity
+    @Deprecated("This method has been deprecated in favor of using the Activity Result API\n      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt\n      contracts for common intents available in\n      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for\n      testing, and allow receiving results in separate, testable classes independent from your\n      activity. Use\n      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}\n      with the appropriate {@link ActivityResultContract} and handling the result in the\n      {@link ActivityResultCallback#onActivityResult(Object) callback}.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        Log.d("MainActivity", "onActivityResult: requestCode=$requestCode, resultCode=$resultCode")
+
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == CONFIG_REQUEST_CODE && resultCode == RESULT_OK) {
+
+            Log.d("MainActivity", "onActivityResult: data=$data")
+
+            data?.let {
+                val newRows = it.getIntExtra("rows", 10)
+                val newColumns = it.getIntExtra("columns", 10)
+                val newMineCount = it.getIntExtra("mineCount", 10)
+
+                rows = newRows
+                columns = newColumns
+                mineCount = newMineCount
+
+                restartGame()
             }
+            // Restart the game with new parameters
         }
+    }
+
+
+    companion object {
+        const val CONFIG_REQUEST_CODE = 1
     }
 }
 
 @Composable
-fun MinesweeperGrid(game: MinesweeperGame, onRestartGame: () -> Unit) {
-    Column {
+fun MinesweeperApp(
+    rows: Int,
+    columns: Int,
+    mineCount: Int,
+    onConfigClick: () -> Unit,
+    onRestartGame: () -> Unit
+) {
+    val game = remember { MinesweeperGame(rows, columns, mineCount) }
+
+    var showDialog by remember { mutableStateOf(false) }
+    var dialogMessage by remember { mutableStateOf("") }
+
+    if (game.isGameOver || game.isGameWon) {
+        dialogMessage = if (game.isGameOver) "Game Over" else "You Win!"
+        // Check for game over or win state
+        showDialog = true
+    }
+
+    Column(
+        modifier = Modifier
+            .background(Color.Gray)
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Button(
+            onClick = onConfigClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+
+            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray) // Make button background transparent
+        ) {
+            // Optional padding
+            Text(
+                text = "Settings",
+                color = Color.White // Text color
+            )
+        }
+
+
+
+        MinesweeperGrid(game = game, Modifier.weight(1f))
+
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                },
+                title = { Text(dialogMessage) },
+                text = { Text("Shake to restart!") },
+                confirmButton = {
+                    Button(onClick = {
+                        onRestartGame()
+                        showDialog = false // Close dialog and restart game
+                    }) {
+                        Text("Restart Game")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.9f),
+                dismissButton = null // Optionally add a dismiss button
+            )
+        }
+        showDialog = false // Close dialog when dismissed
+
+    }
+}
+
+@Composable
+fun MinesweeperGrid(game: MinesweeperGame, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.Center) {
         for (row in 0 until game.rows) {
             Row {
                 for (col in 0 until game.columns) {
@@ -157,13 +288,15 @@ fun CellView(cell: Cell, onClick: () -> Unit, onFlag: () -> Unit) {
         modifier = Modifier
             .size(36.dp)
             .background(if (cell.isRevealed.value) Color.Gray else Color.DarkGray)
+            .border(1.dp, Color.Gray)
             .padding(4.dp)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { onClick() },
                     onLongPress = { onFlag() }
                 )
-            },
+            }
+            .padding(1.dp),
         contentAlignment = Alignment.Center
     ) {
         when {
@@ -173,18 +306,14 @@ fun CellView(cell: Cell, onClick: () -> Unit, onFlag: () -> Unit) {
                 textAlign = TextAlign.Center
             )
 
-            cell.isRevealed.value && cell.adjacentMines.value > 0 -> Text(
-                "${cell.adjacentMines.value}",
+            cell.isRevealed.value && cell.adjacentMines > 0 -> Text(
+                "${cell.adjacentMines}",
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center
             )
 
             cell.isFlagged.value -> Text("🚩", fontSize = 16.sp, textAlign = TextAlign.Center)
-            else -> Text(
-                "",
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center
-            ) // Handle unrevealed cells
+            else -> Text("", fontSize = 16.sp, textAlign = TextAlign.Center)
         }
     }
 }
@@ -215,7 +344,7 @@ class MinesweeperGame(val rows: Int, val columns: Int, val mineCount: Int) {
         for (row in 0 until rows) {
             for (column in 0 until columns) {
                 if (!grid[row][column].isMine) {
-                    grid[row][column].adjacentMines.value =
+                    grid[row][column].adjacentMines =
                         getAdjacentCells(row, column).count { it.isMine }
                 }
             }
@@ -238,14 +367,10 @@ class MinesweeperGame(val rows: Int, val columns: Int, val mineCount: Int) {
         val cell = grid[row][column]
         if (cell.isRevealed.value || cell.isFlagged.value || isGameOver) return
 
-        // Reveal the current cell
         cell.isRevealed.value = true
-
-        // Check if the cell is a mine
         if (cell.isMine) {
             isGameOver = true
-        } else if (cell.adjacentMines.value == 0) {
-            // Reveal adjacent cells if no adjacent mines
+        } else if (cell.adjacentMines == 0) {
             getAdjacentCells(row, column).forEach { adjacentCell ->
                 val adjacentRow = grid.indexOfFirst { rowCells -> rowCells.contains(adjacentCell) }
                 val adjacentColumn = grid[adjacentRow].indexOf(adjacentCell)
@@ -274,11 +399,60 @@ data class Cell(
     var isMine: Boolean = false,
     var isRevealed: MutableState<Boolean> = mutableStateOf(false),
     var isFlagged: MutableState<Boolean> = mutableStateOf(false),
-    var adjacentMines: MutableState<Int> = mutableIntStateOf(0)
+    var adjacentMines: Int = 0
 )
+
+@Composable
+fun GameOverModal(isGameOver: Boolean, isGameWon: Boolean, onDismiss: () -> Unit) {
+    if (isGameOver) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f)) // Semi-transparent background
+                .wrapContentSize(Alignment.Center)
+        ) {
+            Surface(
+                modifier = Modifier.padding(16.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (isGameWon) "You Win!" else "Game Over",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isGameWon) Color.Green else Color.Red,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onDismiss) {
+                        Text("Restart Game")
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 @Preview(showBackground = true)
 @Composable
 fun DefaultPreview() {
-    MinesweeperApp(onRestartGame = {})
+    MinesweeperApp(
+        rows = 10,
+        columns = 10,
+        mineCount = 10,
+        onConfigClick = {},
+        onRestartGame = {}
+    )
 }
+
+@Preview(showBackground = true)
+@Composable
+fun GameOverModalPreview() {
+    GameOverModal(isGameOver = true, isGameWon = false, onDismiss = {})
+}
+
